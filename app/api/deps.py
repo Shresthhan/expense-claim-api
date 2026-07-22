@@ -1,35 +1,40 @@
 """API dependencies."""
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from app.core.security import decode_access_token
+from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User, UserRole
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
+bearer_scheme = HTTPBearer()
 
 def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme),
 ) -> User:
+    token = credentials.credentials
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
     )
 
     try:
-        payload = decode_access_token(token)
-        subject = payload.get("sub")
-        if subject is None:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        user_id = payload.get("sub")
+        if user_id is None:
             raise credentials_exception
-        user_id = int(subject)
-    except (ValueError, TypeError):
+    except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if not user:
         raise credentials_exception
 
     return user
